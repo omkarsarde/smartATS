@@ -40,8 +40,8 @@ llm = None
 
 # Try using OpenAI if API key is available
 if os.getenv("OPENAI_API_KEY") and HAS_OPENAI:
-    llm = OpenAI(model="gpt-3.5-turbo", temperature=0.7)
-    print("Using OpenAI GPT-3.5 for explanations")
+    llm = OpenAI(model="gpt-4o-mini", temperature=0.7)
+    print("Using OpenAI GPT-4o-mini for explanations")
 # If no OpenAI, try Anthropic if API key is available
 elif os.getenv("ANTHROPIC_API_KEY"):
     try:
