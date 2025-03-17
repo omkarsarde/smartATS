@@ -1,5 +1,15 @@
 import os
 from crewai import Agent, Task, Crew
+
+# Try to import OpenAI LLM adapter
+try:
+    from crewai.llms import OpenAI
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+    print("WARNING: Could not import OpenAI adapter from crewai.llms")
+
+# Try to import local LLM support
 try:
     from langchain_community.llms import HuggingFacePipeline
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
@@ -25,19 +35,31 @@ def parse_resume_pdf(file_bytes: bytes) -> dict:
         "text": None
     }
 
-# Initialize a local LLM if dependencies are available and no API keys are set
-# This is optional and falls back to CrewAI's default if not available
-local_llm = None
-if HAS_LOCAL_LLM and not (os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")):
+# Select the appropriate LLM to use
+llm = None
+
+# Try using OpenAI if API key is available
+if os.getenv("OPENAI_API_KEY") and HAS_OPENAI:
+    llm = OpenAI(model="gpt-3.5-turbo", temperature=0.7)
+    print("Using OpenAI GPT-3.5 for explanations")
+# If no OpenAI, try Anthropic if API key is available
+elif os.getenv("ANTHROPIC_API_KEY"):
+    try:
+        from crewai.llms import Anthropic
+        llm = Anthropic(model="claude-3-haiku-20240307")
+        print("Using Anthropic Claude for explanations")
+    except ImportError:
+        print("Could not import Anthropic adapter from crewai.llms")
+
+# Fall back to local LLM as last resort
+if llm is None and HAS_LOCAL_LLM:
     try:
         # Try to load a smaller model that can run on CPU
-        # This is just an example; adjust based on hardware capabilities
         model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"  # Small model that can run on CPU
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         model = AutoModelForCausalLM.from_pretrained(model_id, 
-                                                    device_map="auto", 
-                                                    load_in_8bit=True,  # Reduce memory usage
-                                                    trust_remote_code=True)
+                                                  device_map="auto",
+                                                  trust_remote_code=True)
         
         # Create a pipeline
         pipe = pipeline(
@@ -51,10 +73,13 @@ if HAS_LOCAL_LLM and not (os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_AP
         
         # Create LangChain wrapper
         local_llm = HuggingFacePipeline(pipeline=pipe)
+        llm = local_llm
         print("Successfully loaded local LLM model for explanations")
     except Exception as e:
         print(f"Could not load local LLM model: {e}")
-        local_llm = None
+        llm = None  # CrewAI will use its default
+
+print(f"LLM configured: {llm.__class__.__name__ if llm else 'Using CrewAI default'}")
 
 # Initialize a CrewAI agent for matching and explanation
 matching_agent = Agent(
@@ -63,7 +88,8 @@ matching_agent = Agent(
     backstory=("You are an expert HR recruiter with deep knowledge of job requirements and resume analysis. "
                "You compare job descriptions with candidate resumes, identify skill matches, related (adjacent) skills, "
                "missing skills, and suggest improvements for the candidate."),
-    llm=local_llm  # This will be None if local LLM couldn't be loaded, and CrewAI will use its default
+    llm=llm,  # Use the selected LLM
+    verbose=True,  # Enable verbose mode for debugging
 )
  
 def generate_match_explanation(job_description: str, resume_structured: dict) -> str:
@@ -94,9 +120,20 @@ def generate_match_explanation(job_description: str, resume_structured: dict) ->
         "4. Missing important skills from the resume (that the job description asks for).\n"
         "5. A short recommendation on how the candidate could improve their resume for this job."
     )
+    
     # Create a CrewAI task for this analysis
-    task = Task(description=task_description, agent=matching_agent)
-    crew = Crew(agents=[matching_agent], tasks=[task])
+    task = Task(
+        description=task_description,
+        agent=matching_agent,
+        expected_output="A detailed analysis of how well the resume matches the job description with specific sections for matched skills, adjacent skills, missing skills, and improvement recommendations."
+    )
+    
+    # Create a crew with just our matching agent
+    crew = Crew(
+        agents=[matching_agent],
+        tasks=[task],
+        verbose=True
+    )
     
     try:
         result = crew.kickoff()  # Execute the agent task
@@ -104,6 +141,14 @@ def generate_match_explanation(job_description: str, resume_structured: dict) ->
     except Exception as e:
         # Fallback if there's an error with the agent or LLM
         print(f"Agent explanation generation failed: {e}")
-        explanation = f"Score: 5/10\n\nAnalysis could not be generated. The system was able to match this resume, but detailed analysis requires configured LLM access.\n\nError: {str(e)}"
+        explanation = (
+            f"Score: 5/10\n\n"
+            f"Analysis could not be generated due to an error. The system was able to determine "
+            f"that this resume is somewhat relevant to the job description, but a detailed analysis "
+            f"could not be produced.\n\n"
+            f"Technical Error: {str(e)}\n\n"
+            f"Please ensure your OpenAI API key is properly configured if you'd like to receive "
+            f"detailed match explanations."
+        )
     
     return explanation

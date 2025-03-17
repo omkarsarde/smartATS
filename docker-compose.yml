@@ -12,7 +12,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "${DB_USER}"]
+      test: ["CMD", "pg_isready", "-U", "${DB_USER}", "-d", "${DB_NAME}"]
       interval: 5s
       retries: 5
 
@@ -25,8 +25,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Optional API keys for external LLM services if needed by CrewAI
-      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # OpenAI API key for CrewAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Optional Anthropic API key if needed
       # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DB_HOST=db
       - DB_PORT=5432

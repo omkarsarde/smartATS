@@ -1,11 +1,3 @@
-#!/bin/bash
-# This script prepares the system for deployment
-
-echo "Preparing the resume matching system for deployment..."
-
-# Create the sample resumes script in the backend directory
-echo "Creating sample resumes script..."
-cat > backend/add_sample_resumes.py << 'EOL'
 #!/usr/bin/env python
 """
 This script adds sample resumes to the database for testing workflow 1.
@@ -22,6 +14,8 @@ from sentence_transformers import SentenceTransformer
 
 # Initialize the sentence transformer model
 model = SentenceTransformer('all-MiniLM-L6-v2')
+from database import Base, engine
+Base.metadata.create_all(bind=engine)
 
 def add_sample_resumes():
     """Add sample resumes to the database"""
@@ -106,20 +100,3 @@ def add_sample_resumes():
 
 if __name__ == "__main__":
     add_sample_resumes()
-EOL
-
-# Create .env file if it doesn't exist
-if [ ! -f .env ]; then
-    echo "Creating .env file..."
-    cat > .env << EOL
-DB_USER=resuser
-DB_PASS=respass
-DB_NAME=resumedb
-# Replace with your actual API key
-OPENAI_API_KEY=your_openai_key_here
-EOL
-    echo "Created .env file. Please edit it to add your OpenAI API key."
-fi
-
-echo "Setup complete! Now you can run the system with:"
-echo "./start.sh"

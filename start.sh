@@ -15,6 +15,12 @@ if [ "$OPENAI_KEY" = "your_openai_key_here" ]; then
     echo "Warning: Please update your OpenAI API key in the .env file for full functionality."
 fi
 
+# Create backend directory for add_sample_resumes.py if it doesn't exist
+if [ ! -f backend/add_sample_resumes.py ]; then
+    echo "Sample resume script not found. Please run setup.sh first."
+    exit 1
+fi
+
 # Start the containers
 echo "Starting containers with docker-compose..."
 docker compose up --build -d
@@ -35,7 +41,7 @@ if ! docker ps | grep resume_frontend > /dev/null; then
     exit 1
 fi
 
-# Add sample resumes if they don't exist
+# Add sample resumes if needed
 echo "Checking if sample resumes need to be added..."
 docker exec resume_backend python /app/add_sample_resumes.py
 

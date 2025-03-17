@@ -2,8 +2,8 @@ import faiss
 import numpy as np
 
 # Use the embedding dimension for the sentence-transformer model
-# The dimension depends on the exact model, but 768 is common for many models like 'all-MiniLM-L6-v2'
-EMBEDDING_DIM = 768
+# The dimension depends on the exact model, but 384 is common for many models like 'all-MiniLM-L6-v2'
+EMBEDDING_DIM = 384
 
 # Initialize a FAISS index for cosine similarity (inner product on normalized vectors)
 index = faiss.IndexIDMap(faiss.IndexFlatIP(EMBEDDING_DIM))
