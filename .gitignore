@@ -1,0 +1,25 @@
+# Environment variables
+.env
+.env.*
+env/
+venv/
+ENV/
+
+# IDE-specific files
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# VSCode
+.vscode/
+*.code-workspace
+.history/
+
+# Docker volumes and data
+resumes/
+db_data/
+/data/
+*.db
