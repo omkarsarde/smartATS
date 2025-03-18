@@ -1,6 +1,7 @@
 import os
 import requests
 import streamlit as st
+import json
 
 # Configuration
 st.set_page_config(page_title="Resume Matcher", layout="wide")
@@ -70,8 +71,94 @@ with tab1:
                                 explanation = m.get("explanation", "")
                                 
                                 with st.expander(f"#{i+1}: {name} — Match Score: {score}/100", expanded=(i==0)):
-                                    # Print the explanation text, preserving formatting
-                                    st.markdown(explanation.replace("\n", "  \n"))
+                                    try:
+                                        # Try to parse explanation as JSON
+                                        exp_data = json.loads(explanation) if isinstance(explanation, str) else explanation
+                                        
+                                        # Create a nicely formatted display
+                                        st.subheader("Match Analysis")
+                                        
+                                        # Match score display
+                                        match_score = exp_data.get("match_score", 0)
+                                        st.metric("Match Score", f"{match_score}/100")
+                                        
+                                        # Display matched skills
+                                        st.subheader("Matched Skills")
+                                        matched_skills = exp_data.get("matched_skills", [])
+                                        if matched_skills:
+                                            for skill in matched_skills:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No direct skill matches found*")
+                                            
+                                        # Display adjacent/transferable skills
+                                        st.subheader("Adjacent/Transferable Skills")
+                                        adjacent_skills = exp_data.get("adjacent_skills", [])
+                                        if adjacent_skills:
+                                            for skill in adjacent_skills:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No adjacent skills identified*")
+                                        
+                                        # Display missing skills
+                                        st.subheader("Missing Skills")
+                                        missing_skills = exp_data.get("missing_skills", [])
+                                        if missing_skills:
+                                            for skill in missing_skills:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No critical missing skills identified*")
+                                        
+                                        # Display red flags if any
+                                        red_flags = exp_data.get("red_flags", [])
+                                        if red_flags:
+                                            st.subheader("Concerns/Red Flags")
+                                            for flag in red_flags:
+                                                st.markdown(f"- {flag}")
+                                        
+                                        # Display evaluation summary
+                                        st.subheader("Evaluation Summary")
+                                        st.markdown(exp_data.get("evaluation_summary", "No summary available"))
+                                        
+                                        # Display improvement plan
+                                        st.header("Improvement Plan")
+                                        
+                                        # Skills to develop
+                                        st.subheader("Top Skills to Develop")
+                                        skills_to_develop = exp_data.get("top_skills_to_develop", [])
+                                        if skills_to_develop:
+                                            for skill in skills_to_develop:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No specific skills to develop identified*")
+                                            
+                                        # Estimated timeline
+                                        st.subheader("Estimated Learning Timeline")
+                                        timeline = exp_data.get("estimated_time", {})
+                                        if timeline:
+                                            for skill, time in timeline.items():
+                                                st.markdown(f"- **{skill}**: {time}")
+                                        
+                                        # Learning resources
+                                        st.subheader("Recommended Resources")
+                                        resources = exp_data.get("resources", {})
+                                        if resources:
+                                            for skill, res_list in resources.items():
+                                                st.markdown(f"**{skill}**:")
+                                                for res in res_list:
+                                                    st.markdown(f"- {res}")
+                                        
+                                        # Development roadmap
+                                        st.subheader("Development Roadmap")
+                                        st.markdown(exp_data.get("roadmap", "No roadmap available"))
+                                        
+                                        # Realistic score estimate
+                                        realistic_score = exp_data.get("realistic_score_estimate", 0)
+                                        st.metric("Potential Match Score After Improvement", f"{realistic_score}/100")
+                                        
+                                    except (json.JSONDecodeError, AttributeError):
+                                        # Fallback to plain text if JSON parsing fails
+                                        st.markdown(explanation.replace("\n", "  \n"))
                 
                 except Exception as e:
                     st.error(f"Failed to get response from backend: {e}")
@@ -155,8 +242,94 @@ with tab2:
                                 explanation = m.get("explanation", "")
                                 
                                 with st.expander(f"#{i+1}: {name} — Match Score: {score}/100", expanded=(i==0)):
-                                    # Print the explanation text, preserving formatting
-                                    st.markdown(explanation.replace("\n", "  \n"))
+                                    try:
+                                        # Try to parse explanation as JSON
+                                        exp_data = json.loads(explanation)
+                                        
+                                        # Create a nicely formatted display
+                                        st.subheader("Match Analysis")
+                                        
+                                        # Match score display
+                                        match_score = exp_data.get("match_score", 0)
+                                        st.metric("Match Score", f"{match_score}/100")
+                                        
+                                        # Display matched skills
+                                        st.subheader("Matched Skills")
+                                        matched_skills = exp_data.get("matched_skills", [])
+                                        if matched_skills:
+                                            for skill in matched_skills:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No direct skill matches found*")
+                                            
+                                        # Display adjacent/transferable skills
+                                        st.subheader("Adjacent/Transferable Skills")
+                                        adjacent_skills = exp_data.get("adjacent_skills", [])
+                                        if adjacent_skills:
+                                            for skill in adjacent_skills:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No adjacent skills identified*")
+                                        
+                                        # Display missing skills
+                                        st.subheader("Missing Skills")
+                                        missing_skills = exp_data.get("missing_skills", [])
+                                        if missing_skills:
+                                            for skill in missing_skills:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No critical missing skills identified*")
+                                        
+                                        # Display red flags if any
+                                        red_flags = exp_data.get("red_flags", [])
+                                        if red_flags:
+                                            st.subheader("Concerns/Red Flags")
+                                            for flag in red_flags:
+                                                st.markdown(f"- {flag}")
+                                        
+                                        # Display evaluation summary
+                                        st.subheader("Evaluation Summary")
+                                        st.markdown(exp_data.get("evaluation_summary", "No summary available"))
+                                        
+                                        # Display improvement plan
+                                        st.header("Improvement Plan")
+                                        
+                                        # Skills to develop
+                                        st.subheader("Top Skills to Develop")
+                                        skills_to_develop = exp_data.get("top_skills_to_develop", [])
+                                        if skills_to_develop:
+                                            for skill in skills_to_develop:
+                                                st.markdown(f"- {skill}")
+                                        else:
+                                            st.markdown("*No specific skills to develop identified*")
+                                            
+                                        # Estimated timeline
+                                        st.subheader("Estimated Learning Timeline")
+                                        timeline = exp_data.get("estimated_time", {})
+                                        if timeline:
+                                            for skill, time in timeline.items():
+                                                st.markdown(f"- **{skill}**: {time}")
+                                        
+                                        # Learning resources
+                                        st.subheader("Recommended Resources")
+                                        resources = exp_data.get("resources", {})
+                                        if resources:
+                                            for skill, res_list in resources.items():
+                                                st.markdown(f"**{skill}**:")
+                                                for res in res_list:
+                                                    st.markdown(f"- {res}")
+                                        
+                                        # Development roadmap
+                                        st.subheader("Development Roadmap")
+                                        st.markdown(exp_data.get("roadmap", "No roadmap available"))
+                                        
+                                        # Realistic score estimate
+                                        realistic_score = exp_data.get("realistic_score_estimate", 0)
+                                        st.metric("Potential Match Score After Improvement", f"{realistic_score}/100")
+                                        
+                                    except (json.JSONDecodeError, AttributeError):
+                                        # Fallback to plain text if JSON parsing fails
+                                        st.markdown(explanation.replace("\n", "  \n"))
                 
                 except Exception as e:
                     st.error(f"Failed to get response from backend: {e}")

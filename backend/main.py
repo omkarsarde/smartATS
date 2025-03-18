@@ -345,14 +345,46 @@ def match_resumes(job_description: str = Form(...), top_k: int = 5, db: Session 
         
         # Extract the match score from the explanation rather than using FAISS similarity
         # Look for patterns like "Match Score: 75/100" in the explanation
-        score_match = re.search(r'[Mm]atch [Ss]core:?\s*(\d+)(?:/100)?', explanation)
-        if score_match:
-            similarity_pct = int(score_match.group(1))
-            print(f"Extracted match score {similarity_pct} from explanation for {resume_rec.name}")
-        else:
-            # Fallback to FAISS similarity if we can't extract a score
-            similarity_pct = int((score * 100)) if score <= 1 else int(score)
-            print(f"Using FAISS similarity score {similarity_pct} for {resume_rec.name}")
+        try:
+            # The explanation could be either a JSON string or a Python dict/object
+            if isinstance(explanation, dict):
+                # It's already a Python dict
+                explanation_data = explanation
+                explanation = json.dumps(explanation)  # Convert to string for storage
+            elif isinstance(explanation, str):
+                # It's a JSON string, parse it
+                try:
+                    explanation_data = json.loads(explanation)
+                except json.JSONDecodeError:
+                    # Not valid JSON, will fall through to regex extraction
+                    explanation_data = None
+            else:
+                # Convert whatever it is to a string
+                explanation_str = str(explanation)
+                try:
+                    explanation_data = json.loads(explanation_str)
+                    explanation = explanation_str  # Use the string version for storage
+                except json.JSONDecodeError:
+                    explanation_data = None
+                    explanation = explanation_str  # Use the string version for storage
+            
+            # If we have valid JSON data, extract the match score
+            if explanation_data:
+                similarity_pct = explanation_data.get("match_score", 0)
+                print(f"Parsed match score {similarity_pct} from JSON explanation for {resume_rec.name}")
+            else:
+                # Fall through to regex extraction
+                raise json.JSONDecodeError("No valid JSON found", "", 0)
+        except json.JSONDecodeError:
+            # Fallback to regex extraction if not valid JSON
+            score_match = re.search(r'[Mm]atch [Ss]core:?[\s]*(\d+)(?:/100)?', explanation)
+            if score_match:
+                similarity_pct = int(score_match.group(1))
+                print(f"Extracted match score {similarity_pct} from explanation for {resume_rec.name}")
+            else:
+                # Fallback to FAISS similarity if we can't extract a score
+                similarity_pct = int((score * 100)) if score <= 1 else int(score)
+                print(f"Using FAISS similarity score {similarity_pct} for {resume_rec.name}")
         
         matches.append({
             "resume_id": res_id,
@@ -419,14 +451,14 @@ def match_multiple_resumes(
             if not content:
                 print(f"Skipping empty file: {file.filename}")
                 continue
-            
+
             # Parse resume to get structured data with validation
             parsed = parse_resume_pdf(content, validate=True)
             validation_status = parsed.get("validation_status", "unknown")
             resume_hash = parsed.get("resume_hash")
-            
+
             print(f"Parsed resume {file.filename}, validation status: {validation_status}")
-            
+
             # Check for duplicates if storing in DB
             if store_in_db and resume_hash:
                 existing = db.query(Resume).filter(Resume.resume_hash == resume_hash).first()
@@ -437,9 +469,8 @@ def match_multiple_resumes(
                         "duplicate_of_id": existing.id,
                         "duplicate_of_name": existing.name
                     })
-                    # Skip further processing for this file
                     continue
-            
+
             # Use structured fields to form an embedding input
             embed_text = parsed.get("text")
             if not embed_text:
@@ -450,7 +481,7 @@ def match_multiple_resumes(
                     embed_text += f"Education: {parsed['education']}. "
                 if parsed.get("years_of_experience"):
                     embed_text += f"{parsed['years_of_experience']} years of experience. "
-                
+
                 # Add work experience to embedding if available
                 work_exp = parsed.get("work_experience")
                 if work_exp:
@@ -460,44 +491,39 @@ def match_multiple_resumes(
                             embed_text += f" {job.get('title')} at {job.get('company')}. {job.get('description')}"
                     except Exception as e:
                         print(f"Error processing work experience: {e}")
-                
                 if embed_text == "":
                     print(f"Warning: No content extracted for {file.filename}, using filename")
-                    embed_text = file.filename  # fallback to using filename as content
-            
+                    embed_text = file.filename
+
             print(f"Generated embedding text ({len(embed_text)} chars) for {file.filename}")
-            
+
             # Compute embedding for the resume
             resume_vector = model.encode(embed_text).tolist()
-            
+
             # Normalize resume vector for cosine similarity
             rvec = np.array(resume_vector, dtype='float32')
             norm_r = np.linalg.norm(rvec)
             if norm_r != 0:
                 rvec = rvec / norm_r
-            
+
             # Compute similarity score (cosine similarity)
             score = float(np.dot(jvec, rvec))
             print(f"Similarity score for {file.filename}: {score:.4f}")
-            
+
             # Store resume in DB if requested
             resume_id = None
             if store_in_db:
-                # Need to reset the file position for storage
                 file.file.seek(0)
                 filename = file.filename
                 os.makedirs("resumes", exist_ok=True)
                 file_path = os.path.join("resumes", filename)
-                
                 with open(file_path, "wb") as f:
                     f.write(content)
-                
-                # Create Resume record in DB with validation data
                 new_resume = Resume(
                     name=parsed.get("name") or filename.split(".")[0],
                     contact=parsed.get("contact"),
-                    skills=(",".join(parsed.get("skills")) if isinstance(parsed.get("skills"), list) else parsed.get("skills")) if parsed.get("skills") else None,
-                    education=parsed.get("education"),
+                    skills=", ".join(parsed.get("skills")) if isinstance(parsed.get("skills"), list) else parsed.get("skills"),
+                    education=json.dumps(parsed.get("education")) if isinstance(parsed.get("education"), dict) else parsed.get("education"),
                     years_of_experience=parsed.get("years_of_experience"),
                     work_experience=json.dumps(parsed.get("work_experience")) if isinstance(parsed.get("work_experience"), list) else parsed.get("work_experience"),
                     resume_path=file_path,
@@ -508,17 +534,14 @@ def match_multiple_resumes(
                     validation_status=validation_status,
                     is_duplicate=False
                 )
-                
                 db.add(new_resume)
                 db.commit()
                 db.refresh(new_resume)
                 resume_id = new_resume.id
-                
-                # Add to vector index
                 add_resume_vector(new_resume.id, resume_vector)
                 stored_resume_ids.append(resume_id)
                 print(f"Stored resume in database with ID {resume_id}")
-            
+
             # Generate explanation via agent
             structured = {
                 "name": parsed.get("name") or file.filename.split(".")[0],
@@ -528,33 +551,63 @@ def match_multiple_resumes(
                 "years_of_experience": parsed.get("years_of_experience"),
                 "work_experience": parsed.get("work_experience")
             }
-            
+
             print(f"Generating match explanation for {file.filename}")
             explanation = generate_match_explanation(job_description, structured)
-            
-            # Extract the match score from the explanation rather than using similarity
-            score_match = re.search(r'[Mm]atch [Ss]core:?\s*(\d+)(?:/100)?', explanation)
-            if score_match:
-                similarity_pct = int(score_match.group(1))
-                print(f"Extracted match score {similarity_pct} from explanation for {file.filename}")
-            else:
-                # Fallback to FAISS similarity if we can't extract a score
-                similarity_pct = int(score * 100)
-                print(f"Using FAISS similarity score {similarity_pct} for {file.filename}")
-            
+
+            try:
+                # The explanation could be either a JSON string or a Python dict/object
+                if isinstance(explanation, dict):
+                    # It's already a Python dict
+                    explanation_data = explanation
+                    explanation = json.dumps(explanation)  # Convert to string for storage
+                elif isinstance(explanation, str):
+                    # It's a JSON string, parse it
+                    try:
+                        explanation_data = json.loads(explanation)
+                    except json.JSONDecodeError:
+                        # Not valid JSON, will fall through to regex extraction
+                        explanation_data = None
+                else:
+                    # Convert whatever it is to a string
+                    explanation_str = str(explanation)
+                    try:
+                        explanation_data = json.loads(explanation_str)
+                        explanation = explanation_str  # Use the string version for storage
+                    except json.JSONDecodeError:
+                        explanation_data = None
+                        explanation = explanation_str  # Use the string version for storage
+                
+                # If we have valid JSON data, extract the match score
+                if explanation_data:
+                    similarity_pct = explanation_data.get("match_score", 0)
+                    print(f"Parsed match score {similarity_pct} from JSON explanation for {file.filename}")
+                else:
+                    # Fall through to regex extraction
+                    raise json.JSONDecodeError("No valid JSON found", "", 0)
+            except json.JSONDecodeError:
+                # Fallback to regex extraction if not valid JSON
+                score_match = re.search(r'[Mm]atch [Ss]core:?[\s]*(\d+)(?:/100)?', explanation)
+                if score_match:
+                    similarity_pct = int(score_match.group(1))
+                    print(f"Extracted match score {similarity_pct} from explanation for {file.filename}")
+                else:
+                    # Fallback to FAISS similarity if we can't extract a score
+                    similarity_pct = int((score * 100)) if score <= 1 else int(score)
+                    print(f"Using FAISS similarity score {similarity_pct} for {file.filename}")
+
             temporary_results.append({
                 "name": structured["name"],
                 "score": similarity_pct,
                 "explanation": explanation,
-                "resume_id": resume_id,  # Will be None if not stored in DB
+                "resume_id": resume_id,
                 "validation_status": validation_status
             })
-            
+
             print(f"Completed processing for {file.filename}")
-            
         except Exception as e:
-            print(f"Error processing file {file.filename}: {e}")
-            # Continue with other files if one fails
+            print(f"Error processing file {file.filename if hasattr(file, 'filename') else 'unknown'}: {e}")
+            # Continue with next file
     
     # If we stored any resumes, save the index in the background
     if store_in_db and stored_resume_ids:
@@ -704,7 +757,7 @@ def add_test_samples(background_tasks: BackgroundTasks = None, db: Session = Dep
     try:
         # Check if we already have samples
         existing_count = db.query(Resume).count()
-        if existing_count > 0:
+        if existing_count > 20:
             return {
                 "status": "skipped",
                 "message": f"Database already contains {existing_count} resumes. No new samples added."
@@ -776,14 +829,12 @@ def add_test_samples(background_tasks: BackgroundTasks = None, db: Session = Dep
                     
                     print("Starting resume generation crew...")
                     result = crew.kickoff()
-                    print(f"Resume generation complete, got result of length {len(result) if result else 0}")
+                    print(f"Resume generation complete, got result of length {len(str(result)) if result else 0}")
                     
-                    # Extract the JSON array from the result
-                    json_match = re.search(r'(\[.*\])', result, re.DOTALL)
-                    if json_match:
-                        resumes_json = json.loads(json_match.group(1))
-                        print(f"Successfully parsed JSON from result, found {len(resumes_json)} resumes")
-                        return resumes_json
+                    # Extract the JSON array using CrewOutput interface
+                    resumes_json = json.loads(str(result))
+                    print(f"Successfully parsed JSON from result, found {len(resumes_json)} resumes")
+                    return resumes_json
                 except Exception as e:
                     print(f"Error generating resumes with agent: {e}")
             
@@ -917,7 +968,7 @@ def add_test_samples(background_tasks: BackgroundTasks = None, db: Session = Dep
                         f.write(f"Dummy resume for {sample['name']}")
                 
                 # Ensure work_experience is properly formatted as JSON string
-                if isinstance(sample['work_experience'], list):
+                if not isinstance(sample['work_experience'], str):
                     work_experience_json = json.dumps(sample['work_experience'])
                 else:
                     work_experience_json = sample['work_experience']
@@ -946,8 +997,8 @@ def add_test_samples(background_tasks: BackgroundTasks = None, db: Session = Dep
                 new_resume = Resume(
                     name=sample['name'],
                     contact=sample['contact'],
-                    skills=sample['skills'],
-                    education=sample['education'],
+                    skills=", ".join(sample['skills']) if isinstance(sample['skills'], list) else sample['skills'],
+                    education=json.dumps(sample['education']) if isinstance(sample['education'], dict) else sample['education'],
                     years_of_experience=sample['years_of_experience'],
                     work_experience=work_experience_json,
                     resume_path=filepath,

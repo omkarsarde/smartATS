@@ -2,7 +2,8 @@ import os
 import json
 import hashlib
 import io
-from crewai import Agent, Task, Crew, LLM
+import re
+from crewai import Agent, Task, Crew, LLM, Process
 from typing import Dict, List, Optional
 
 
@@ -98,34 +99,27 @@ def create_agents():
         verbose=True
     )
     
-    # HR Specialist for evaluating resume-job matches
-    matcher = Agent(
-        role="Senior HR Specialist",
-        goal="Evaluate resumes against job requirements with extreme precision",
-        backstory="""You are a seasoned HR professional with 15+ years of experience in technical recruiting.
+    # Combined HR Specialist and Career Coach
+    evaluator = Agent(
+        role="Senior HR Specialist & Career Development Coach",
+        goal="Evaluate resumes against job requirements and provide comprehensive improvement plans",
+        backstory="""You are a seasoned HR professional with 15+ years of experience in technical recruiting and career coaching.
         You have an exceptional ability to identify matching skills, recognize adjacent or transferable skills,
         and understand the nuances of job requirements. You've helped hundreds of companies find the perfect
-        candidates for their positions.""",
+        candidates for their positions.
+        
+        Additionally, you are an expert career coach specializing in technical skill development. You have deep 
+        knowledge of learning paths for different technical skills, realistic timeframes for skill acquisition, 
+        and practical advice for career advancement. You provide candidates with personalized improvement plans
+        to help them better match job requirements.""",
         llm=llm,
         verbose=True
     )
     
-    # Career Coach for providing improvement recommendations
-    coach = Agent(
-        role="Technical Career Development Coach",
-        goal="Create personalized skill development plans to help candidates better match job requirements",
-        backstory="""You are an expert career coach specializing in technical skill development.
-        You have deep knowledge of learning paths for different technical skills, realistic timeframes
-        for skill acquisition, and practical advice for career advancement. You've helped thousands
-        of professionals enhance their skills and advance their careers.""",
-        llm=llm,
-        verbose=True
-    )
-    
-    return parser, validator, matcher, coach
+    return parser, validator, evaluator
 
 # Initialize our specialized agents
-resume_parser, resume_validator, hr_matcher, career_coach = create_agents() if llm else (None, None, None, None)
+resume_parser, resume_validator, resume_evaluator = create_agents() if llm else (None, None, None)
 
 def parse_resume_pdf(file_bytes: bytes, validate: bool = True) -> dict:
     """
@@ -198,7 +192,7 @@ def parse_resume_pdf(file_bytes: bytes, validate: bool = True) -> dict:
         
         print("Starting resume parsing crew...")
         result = crew.kickoff()
-        print(f"Resume parsing complete, got result of length {len(result) if result else 0}")
+        print(f"Resume parsing complete, got result of length {len(str(result)) if result else 0}")
         
         # Try to parse the result as JSON
         try:
@@ -337,7 +331,7 @@ def validate_resume_data(text_sample: str, parsed_data: dict) -> dict:
         
         print("Starting resume validation crew...")
         result = crew.kickoff()
-        print(f"Resume validation complete, got result of length {len(result) if result else 0}")
+        print(f"Resume validation complete, got result of length {len(str(result)) if result else 0}")
         
         # Try to parse the result as JSON
         try:
@@ -397,12 +391,12 @@ def _generate_placeholder_resume_data(file_bytes: bytes) -> dict:
         "text": text_sample,
         "validation_status": "placeholder"
     }
-
+ 
 def generate_match_explanation(job_description: str, resume_structured: dict) -> str:
     """
     Use CrewAI agents to generate a detailed explanation for how well the resume matches the job description.
     
-    Returns a text explanation including:
+    Returns a consolidated explanation including:
     - Overall match score
     - Matched skills breakdown
     - Adjacent/transferable skills
@@ -414,7 +408,7 @@ def generate_match_explanation(job_description: str, resume_structured: dict) ->
         return "Error: Missing job description or resume data"
     
     # If we don't have OpenAI LLM configured, provide basic response
-    if not llm or not hr_matcher or not career_coach:
+    if not llm or not resume_evaluator:
         return _generate_basic_match_explanation(job_description, resume_structured)
     
     # Prepare the resume data in a detailed format
@@ -448,7 +442,7 @@ def generate_match_explanation(job_description: str, resume_structured: dict) ->
     
     print(f"Starting match explanation for resume: {name}")
     
-    # Define the evaluation task for the HR matcher
+    # Define the comprehensive evaluation task 
     evaluation_task = Task(
         description=f"""
         Job Description:
@@ -456,67 +450,56 @@ def generate_match_explanation(job_description: str, resume_structured: dict) ->
         
         {resume_info}
         
-        Your task is to perform a comprehensive evaluation of this resume against the job description.
+        Your task is to evaluate the resume against the job description and provide a comprehensive analysis.
+        First evaluate how well the candidate matches the job requirements, then create a personalized improvement plan.
         
-        Provide your response in the following format:
+        Return a JSON object with EXACTLY the following structure:
+        {{
+          "match_score": <number between 0 and 100>,
+          "evaluation_summary": "A concise textual summary of the evaluation",
+          "matched_skills": [list of skills that match job requirements],
+          "adjacent_skills": [list of similar or transferable skills],
+          "missing_skills": [list of critical skills absent from the resume],
+          "red_flags": [list of concerns or misalignments],
+          "top_skills_to_develop": [list of 3 to 5 most important skills to develop],
+          "estimated_time": {{ "skill1": "X months", "skill2": "Y months", ... }},
+          "resources": {{ "skill1": [list of resources], "skill2": [list of resources], ... }},
+          "roadmap": "A detailed step-by-step roadmap for improvement",
+          "realistic_score_estimate": <number representing the improved match score after following the plan>
+        }}
         
-        Start with: "Match Score: [NUMBER]/100" where [NUMBER] is your overall rating from 0-100.
-        
-        Then provide:
-        1. A detailed breakdown of matched skills (skills in the resume that directly meet job requirements).
-        2. Adjacent/transferable skills (skills in the resume that are relevant or similar to required skills).
-        3. Critical missing skills (important skills from the job description that are absent in the resume).
-        4. Any red flags or misalignments in the candidate's experience or qualifications.
-        
-        Be extremely specific about why you assigned the match score. Focus on technical skills, experience,
-        and education. Don't be overly generous - maintain high standards.
+        IMPORTANT: Your response MUST be a valid, parseable JSON object with no additional text before or after. 
+        Include all required fields exactly as shown above.
         """,
-        agent=hr_matcher,
-        expected_output="A detailed evaluation with match score (clearly stated at the beginning), matched skills, adjacent skills, missing skills, and red flags."
-    )
-    
-    # Define the improvement plan task for the career coach
-    improvement_task = Task(
-        description=f"""
-        Job Description:
-        {job_description}
-        
-        {resume_info}
-        
-        Using the resume and job requirements above, create a personalized improvement plan for this candidate.
-        
-        Your response must follow this format:
-        
-        Start with confirming the same "Match Score: [NUMBER]/100" that was assigned by the HR evaluation.
-        
-        Then provide:
-        1. The top 3-5 skills the candidate should develop to better match this job.
-        2. For each skill, estimate the time required to develop it (in months) for someone with their background.
-        3. Specific resources or courses they could use to acquire these skills.
-        4. A step-by-step roadmap for improving their candidacy for this role.
-        5. Realistic estimate of what score they could achieve with these improvements.
-        
-        Be very specific and practical. Assume the candidate has the aptitude and motivation to learn.
-        """, 
-        agent=career_coach,
-        expected_output="A detailed improvement plan that begins with the same match score, followed by specific skills to develop, timeline, resources, and roadmap."
-    )
-    
-    # Create a crew with our specialized agents
-    crew = Crew(
-        agents=[hr_matcher, career_coach],
-        tasks=[evaluation_task, improvement_task],
-        verbose=True
+        agent=resume_evaluator,
+        expected_output="A comprehensive JSON object containing both match evaluation and improvement plan details"
     )
     
     try:
-        # Execute both tasks and get results
+        # Create a crew with just the evaluation task
+        crew = Crew(
+            agents=[resume_evaluator],
+            tasks=[evaluation_task],
+            verbose=True
+        )
+        # Execute the task and get results
         print("Starting match explanation crew...")
-        results = crew.kickoff()
-        # Convert the CrewOutput to string first since it doesn't support len()
-        results_str = str(results)
-        print(f"Match explanation complete, got results of length {len(results_str) if results_str else 0}")
-        return results_str
+        result = crew.kickoff()
+        result_str = str(result)
+        print(f"Match explanation complete, got result of length {len(result_str) if result_str else 0}")
+        
+        try:            
+            result_json = json.loads(result_str)
+            print("Successfully parsed evaluation output as JSON")
+            return result_json
+            
+        except Exception as e:
+            print(f"Failed to parse JSON from result: {e}")
+            print(f"Raw result: {result_str[:200]}...")
+        
+        # If all parsing attempts fail, return the raw result
+        return result_str
+        
     except Exception as e:
         print(f"Agent explanation generation failed: {e}")
         # Fallback to basic explanation
