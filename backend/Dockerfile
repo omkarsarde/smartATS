@@ -13,11 +13,23 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Ensure langchain-huggingface is installed (for updated API compatibility)
+RUN pip install --no-cache-dir langchain-huggingface>=0.0.2
+
+# Pre-download models to speed up first request
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+# Create directory for resume storage
+RUN mkdir -p resumes
+
 # Copy backend code
 COPY ./ ./
 
 # Expose port for FastAPI
 EXPOSE 8000
 
-# Start FastAPI server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Set env var to accept larger file uploads for resume processing
+ENV UPLOAD_LIMIT="10MB"
+
+# Start FastAPI server with hot reload for development
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
